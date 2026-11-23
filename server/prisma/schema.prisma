@@ -1,0 +1,91 @@
+// PostgreSQL model for BookFlow (multi-tenant). Free options: Neon or Supabase free tier.
+// Every tenant table has businessId + an index on it; queries ALWAYS filter by businessId.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  free
+  pro
+}
+
+enum Role {
+  owner
+  staff
+}
+
+enum BookingStatus {
+  confirmed
+  cancelled
+}
+
+model Business {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  type      String
+  timezone  String   @default("Europe/Bucharest")
+  plan      Plan     @default(free)
+  hours     Json // { "1": { "open": "09:00", "close": "18:00" }, "0": null, ... }
+  stripeCustomerId String? @unique
+  createdAt DateTime @default(now())
+
+  members  Membership[]
+  services Service[]
+  bookings Booking[]
+}
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  name        String
+  memberships Membership[]
+}
+
+/// A user can belong to several businesses with a different role in each.
+model Membership {
+  userId     String
+  businessId String
+  role       Role
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@id([userId, businessId])
+}
+
+model Service {
+  id          String    @id @default(cuid())
+  businessId  String
+  name        String
+  durationMin Int
+  price       Int // RON
+  color       String
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bookings    Booking[]
+
+  @@index([businessId])
+}
+
+model Booking {
+  id            String        @id @default(cuid())
+  businessId    String
+  serviceId     String
+  start         DateTime // stored in UTC
+  end           DateTime
+  status        BookingStatus @default(confirmed)
+  customerName  String
+  customerEmail String
+  customerPhone String        @default("")
+  createdAt     DateTime      @default(now())
+  business      Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  service       Service       @relation(fields: [serviceId], references: [id])
+
+  @@index([businessId, start])
+  // Extra safety against double booking in PostgreSQL: an exclusion constraint
+  // (see README) — Prisma cannot express it, so it is added in a SQL migration.
+}
